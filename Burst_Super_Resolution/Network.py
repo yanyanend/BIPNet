@@ -12,8 +12,8 @@ from torchvision.ops import DeformConv2d
 
 from pytorch_lightning import seed_everything
 
-from utils.metrics import PSNR
-psnr_fn = PSNR(boundary_ignore=40)
+#from utils.metrics import PSNR
+#psnr_fn = PSNR(boundary_ignore=40)
 
 seed_everything(13)
 
@@ -213,7 +213,7 @@ class BIPNet(nn.Module):
         super(BIPNet, self).__init__()        
         
         self.train_loss = nn.L1Loss()
-        self.valid_psnr = PSNR(boundary_ignore=40)
+        #self.valid_psnr = PSNR(boundary_ignore=40)
         
         self.conv1 = nn.Sequential(nn.Conv2d(3, num_features, kernel_size=3, padding=1, bias=bias))
 
