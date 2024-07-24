@@ -208,14 +208,14 @@ class AGU(nn.Module):
 ######################### Burst Image Processing Network (BIPNet) ##########################################
 ##############################################################################################
 
-class BIPNet(pl.LightningModule):
+class BIPNet(nn.Module):
     def __init__(self, num_features=64, burst_size=14, reduction=8, bias=False):
         super(BIPNet, self).__init__()        
         
         self.train_loss = nn.L1Loss()
         self.valid_psnr = PSNR(boundary_ignore=40)
         
-        self.conv1 = nn.Sequential(nn.Conv2d(4, num_features, kernel_size=3, padding=1, bias=bias))
+        self.conv1 = nn.Sequential(nn.Conv2d(3, num_features, kernel_size=3, padding=1, bias=bias))
 
         ####### Edge Boosting Feature Alignment
         
@@ -254,9 +254,9 @@ class BIPNet(pl.LightningModule):
         self.UNet = nn.Sequential(MSF(num_features))
         
         ####### Adaptive Group Up-sampling
-        self.SKFF1 = AGU(num_features, 4)
-        self.SKFF2 = AGU(num_features, 4)
-        self.SKFF3 = AGU(num_features, 4)
+        self.SKFF1 = AGU(num_features, 8)
+        self.SKFF2 = AGU(num_features, 8)
+        #self.SKFF3 = AGU(num_features, 4)
 
         ## Output Convolution
         self.conv3 = nn.Sequential(nn.Conv2d(num_features, 3, kernel_size=3, padding=1, bias=bias))      
@@ -333,46 +333,20 @@ class BIPNet(pl.LightningModule):
         ##################################################
 
         b, f, H, W = burst_feat.size()
-        burst_feat = burst_feat.view(b//4, 4, f, H, W)          # (num_features//4, 4, num_features, H/2, W/2)        
-        burst_feat = self.SKFF1(burst_feat)                     # (num_features//4, num_features, H, W)   
+        burst_feat = burst_feat.view(b//8, 8, f, H, W)          # (num_features//8, 8, num_features, H/2, W/2)        
+        burst_feat = self.SKFF1(burst_feat)                     # (num_features//8, num_features, H, W)   
         
         b, f, H, W = burst_feat.size()
-        burst_feat = burst_feat.view(b//4, 4, f, H, W)          # (num_features//16, 4, num_features, H, W)  
-        burst_feat = self.SKFF2(burst_feat)                     # (num_features//16, num_features, 2H, 2W) 
+        burst_feat = burst_feat.view(b//8, 8, f, H, W)          # (num_features//64=1, 8, num_features, H, W)  
+        burst_feat = self.SKFF2(burst_feat)                     # (num_features//64=1, num_features, 2H, 2W) --*4 SR
         
-        b, f, H, W = burst_feat.size()
-        burst_feat = burst_feat.view(b//4, 4, f, H, W)          # (1, 4, num_features, H, W)  
-        burst_feat = self.SKFF3(burst_feat)                     # (1, num_features, 4H, 4W) 
+        #b, f, H, W = burst_feat.size()
+        #burst_feat = burst_feat.view(b//4, 4, f, H, W)          # (1, 4, num_features, H, W)  
+        #burst_feat = self.SKFF3(burst_feat)                     # (1, num_features, 4H, 4W) --
         
         ## Output Convolution
-        burst_feat = self.conv3(burst_feat)                     # (1, 3, 4H, 4W) 
+        burst_feat = self.conv3(burst_feat)                     # (1, 3, 2H, 2W) 
         
         return burst_feat
     
-    def training_step(self, train_batch, batch_idx):
-        x, y, flow_vectors, meta_info = train_batch
-        pred = self.forward(x)
-        pred = pred.clamp(0.0, 1.0)
-        loss = self.train_loss(pred, y)
-        self.log('train_loss', loss, on_step=True, on_epoch=True)
-        return loss
 
-    def validation_step(self, val_batch, batch_idx):
-        x, y, flow_vectors, meta_info = val_batch
-        pred = self.forward(x)
-        pred = pred.clamp(0.0, 1.0)
-        PSNR = self.valid_psnr(pred, y)
-        return PSNR
-
-    def validation_epoch_end(self, outs):
-        # outs is a list of whatever you returned in `validation_step`
-        PSNR = torch.stack(outs).mean()
-        self.log('val_psnr', PSNR, on_step=False, on_epoch=True, prog_bar=True)
-
-    def configure_optimizers(self):        
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 300, eta_min=1e-6)            
-        return [optimizer], [lr_scheduler]
-
-    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
-        optimizer.zero_grad(set_to_none=True)
